@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:http/http.dart' as http;
-import 'package:intl/intl.dart'; // For date formatting
+import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 
 // Fetch Quote from API
@@ -13,6 +13,7 @@ Future<Quote> fetchQuote(DateTime date) async {
       "https://quotes.isha.in/dmq/index.php/Webservice/fetchDailyQuote?date=$formattedDate"));
 
   if (response.statusCode == 200) {
+     print('Fetching quote for date: $date');
     final data = jsonDecode(response.body)["response"]["data"]?[0];
     return Quote.fromJson(data as Map<String, dynamic>);
   } else {
@@ -78,9 +79,10 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   DateTime _currentDate = DateTime.now();
   DateTime _updatedCurrentDate = DateTime.now();
-  final Map<DateTime, Quote?> _quotesCache = {}; // Changed type to store Quote directly
+  final Map<DateTime, Quote?> _quotesCache = {};
+  final Map<DateTime, Future<Quote>?> _fetchingCache = {}; // Cache for ongoing fetch operations
   late PageController _pageController;
-  bool _canScrollRight = true; // To control if right scrolling is enabled
+  bool _canScrollRight = true;
 
   @override
   void initState() {
@@ -92,9 +94,20 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> _loadQuote(DateTime date) async {
     if (!_quotesCache.containsKey(date)) {
-      _quotesCache[date] = await fetchQuote(date); // Store the Quote directly
-      setState(() {}); // Refresh UI after loading
-      print('Fetching quote for date: $date');
+      if (!_fetchingCache.containsKey(date)) {
+        final fetchFuture = fetchQuote(date);
+        _fetchingCache[date] = fetchFuture;
+        try {
+          final quote = await fetchFuture;
+          _quotesCache[date] = quote;
+        } catch (e) {
+          print('Failed to fetch quote for date: $date');
+          _quotesCache[date] = null; // Handle fetch failure
+        } finally {
+          _fetchingCache.remove(date);
+          setState(() {}); // Refresh UI after loading
+        }
+      }
     }
   }
 
@@ -130,21 +143,19 @@ class _MyHomePageState extends State<MyHomePage> {
         children: [
           PageView.builder(
             controller: _pageController,
-            itemCount: null, // Infinite scroll
+            itemCount: null,
             reverse: true,
             itemBuilder: (context, index) {
               final date = _dateForPage(index);
               final quote = _getQuote(date);
               if (quote != null) {
-                // Quote is already cached, build widget directly
                 return QuotePage(
-                  key: PageStorageKey<DateTime>(date), // Use PageStorageKey to cache pages
+                  key: PageStorageKey<DateTime>(date),
                   date: date,
-                  quote: quote, // Pass the cached Quote
+                  quote: quote,
                 );
               } else {
-                // Quote not cached, show loading widget
-                _loadQuote(date); // Load quote for future
+                _loadQuote(date); // Load quote for future if not cached
                 return Center(child: CircularProgressIndicator());
               }
             },
@@ -222,7 +233,7 @@ class _MyHomePageState extends State<MyHomePage> {
 // QuotePage Widget
 class QuotePage extends StatelessWidget {
   final DateTime date;
-  final Quote quote; // Change to accept Quote directly
+  final Quote quote;
 
   const QuotePage({
     required this.date,
@@ -232,7 +243,6 @@ class QuotePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Use the cached image and SVG widgets directly without FutureBuilder
     final imageWidget = Image.network(
       quote.image_name,
       fit: BoxFit.cover,
